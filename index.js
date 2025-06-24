@@ -75,6 +75,3 @@ app.post('/monitorsefaz', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Middleware rodando em http://localhost:${PORT}`);
-});
