@@ -1,77 +1,81 @@
-
-const express = require('express');
-const axios = require('axios');
-const bodyParser = require('body-parser');
+const express = require("express");
+const axios = require("axios");
+const bodyParser = require("body-parser");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`✅ Escutando na porta ${PORT}`);
-});
-// Substitua com o webhook do seu canal Slack
-const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
-
 app.use(bodyParser.json());
 
-app.post('/monitorsefaz', async (req, res) => {
-  const data = req.body;
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 
-  const componente = data?.component?.name || 'Componente desconhecido';
-  const status = data?.component?.status || 'unknown';
-  const timestamp = new Date().toISOString().replace('T', ' ').split('.')[0];
-
-  const statusEmoji = {
-    major_outage: '🔴 Major Outage',
-    partial_outage: '🟠 Partial Outage',
-    degraded_performance: '🟡 Degraded',
-    operational: '🟢 Operational'
+const formatStatus = (status) => {
+  const statusMap = {
+    OPERATIONAL: "🟢 *Operacional*",
+    UNDERMAINTENANCE: "🛠️ *Em manutenção*",
+    DEGRADEDPERFORMANCE: "🟡 *Desempenho degradado*",
+    PARTIALOUTAGE: "🟠 *Indisponibilidade parcial*",
+    MAJOROUTAGE: "🔴 *Indisponível*",
+    INVESTIGATING: "🔍 *Investigando*",
+    IDENTIFIED: "📌 *Problema identificado*",
+    MONITORING: "🔎 *Monitorando*",
+    RESOLVED: "✅ *Resolvido*",
+    NOTSTARTEDYET: "⏳ *Aguardando início*",
+    INPROGRESS: "🔧 *Em andamento*",
+    COMPLETED: "✅ *Concluído*"
   };
+  return statusMap[status] || `⚪ *Status desconhecido (${status})*`;
+};
+
+app.post("/monitorsefaz", async (req, res) => {
+  const data = req.body;
+  console.log("Recebido:", JSON.stringify(data, null, 2));
+
+  let title = ":rotating_light: *Alerta do Monitor Sefaz*";
+  let corpo = "";
+
+  const timestamp = new Date().toISOString().replace("T", " ").substring(0, 19);
+
+  if (data.incident) {
+    const incident = data.incident;
+    const status = formatStatus(incident.status);
+    const impact = incident.impact || "Não informado";
+    const update = incident.incident_updates?.[0]?.body || "Sem detalhes.";
+
+    title = `🚨 *${incident.name || "Incidente sem nome"}*`;
+    corpo = `*📊 Impacto:* ${impact}\n*📍 Status:* ${status}\n*🕒 Atualizado:* ${timestamp}\n\n${update}`;
+  } else if (data.maintenance) {
+    const maintenance = data.maintenance;
+    const status = formatStatus(maintenance.status);
+    const duracao = maintenance.duration || "Não informada";
+    const update = maintenance.maintenance_updates?.[0]?.body || "Sem detalhes.";
+
+    title = `🛠️ *${maintenance.name || "Manutenção programada"}*`;
+    corpo = `*⏳ Duração estimada:* ${duracao}\n*📍 Status:* ${status}\n*🕒 Atualizado:* ${timestamp}\n\n${update}`;
+  } else if (data.component && data.component_update) {
+    const componente = data.component.name || "Componente desconhecido";
+    const status = formatStatus(data.component_update.new_status);
+
+    title = `📦 *Atualização de componente:* ${componente}`;
+    corpo = `*📍 Novo status:* ${status}\n*🕒 Atualizado:* ${timestamp}`;
+  } else {
+    title = `ℹ️ *Notificação não reconhecida*`;
+    corpo = `Conteúdo do payload:\n\`\`\`${JSON.stringify(data, null, 2)}\`\`\``;
+  }
 
   const payload = {
-    blocks: [
-      {
-        type: 'header',
-        text: {
-          type: 'plain_text',
-          text: `🚨 Alerta: ${componente}`,
-          emoji: true
-        }
-      },
-      {
-        type: 'section',
-        fields: [
-          {
-            type: 'mrkdwn',
-            text: `*Status:*\n${statusEmoji[status] || status}`
-          },
-          {
-            type: 'mrkdwn',
-            text: `*Horário:*\n${timestamp}`
-          },
-          {
-            type: 'mrkdwn',
-            text: '*Serviço:*\nEmissão de NF-e'
-          }
-        ]
-      },
-      {
-        type: 'context',
-        elements: [
-          {
-            type: 'mrkdwn',
-            text: '<https://monitorsefaz.webmaniabr.com|Ver no painel>'
-          }
-        ]
-      }
-    ]
+    text: `${title}\n\n${corpo}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🔗 *Verifique no painel:* ${data.page?.url || "https://monitorsefaz.webmaniabr.com"}`
   };
 
   try {
-    const response = await axios.post(SLACK_WEBHOOK_URL, payload);
-    res.status(200).json({ status: 'OK', slack: response.data });
+    await axios.post(SLACK_WEBHOOK_URL, payload);
+    res.status(200).json({ status: "Enviado para Slack com sucesso." });
   } catch (err) {
-    console.error('Erro ao enviar para o Slack:', err.message);
-    res.status(500).json({ error: 'Falha ao enviar alerta' });
+    console.error("Erro ao enviar para Slack:", err.message);
+    res.status(500).json({ error: "Falha ao enviar alerta" });
   }
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
 
